@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Luvr Kazik</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: white;
+            overflow-x: hidden;
+        }
+        .card {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 12px;
+            padding: 14px 20px;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            font-size: 16px;
+            transition: transform 0.2s, opacity 0.2s;
+        }
+        .btn:active { transform: scale(0.98); opacity: 0.9; }
+        .btn-game {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        .btn-success {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+        .btn-gold {
+            background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%);
+            color: #1a1a2e;
+        }
+        .balance-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 20px;
+            padding: 24px;
+            text-align: center;
+            margin-bottom: 16px;
+        }
+        .game-btn {
+            background: rgba(255,255,255,0.15);
+            border-radius: 16px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .game-btn:active { transform: scale(0.95); background: rgba(255,255,255,0.25); }
+        .nav-btn {
+            background: rgba(255,255,255,0.1);
+            border: none;
+            padding: 12px;
+            border-radius: 12px;
+            color: white;
+            cursor: pointer;
+            flex: 1;
+            font-size: 12px;
+        }
+        .nav-btn.active { background: rgba(102, 126, 234, 0.5); }
+        .hidden { display: none !important; }
+        .bet-btn {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            border-radius: 10px;
+            padding: 12px 16px;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .bet-btn:active, .bet-btn.selected { background: rgba(102, 126, 234, 0.6); }
+        .result-win { animation: winPulse 0.5s ease-out; }
+        .result-lose { animation: losePulse 0.5s ease-out; }
+        @keyframes winPulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        @keyframes losePulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(0.95); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .dice-result {
+            font-size: 64px;
+            text-align: center;
+            padding: 20px;
+        }
+        .top-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            margin-bottom: 8px;
+        }
+        .top-item.me { background: rgba(102, 126, 234, 0.3); }
+    </style>
+</head>
+<body>
+    <div id="app" class="p-4 pb-24 max-w-md mx-auto"></div>
+    
+    <!-- Навигация -->
+    <div id="nav" class="fixed bottom-0 left-0 right-0 bg-black/50 backdrop-blur p-3 flex gap-2">
+        <button class="nav-btn active" onclick="showScreen('home')">🏠<br>Главная</button>
+        <button class="nav-btn" onclick="showScreen('games')">🎮<br>Игры</button>
+        <button class="nav-btn" onclick="showScreen('business')">🏢<br>Бизнес</button>
+        <button class="nav-btn" onclick="showScreen('top')">🏆<br>Топ</button>
+        <button class="nav-btn" onclick="showScreen('profile')">👤<br>Профиль</button>
+    </div>
+
+    <script>
+        // Telegram WebApp
+        const tg = window.Telegram?.WebApp;
+        if (tg) {
+            tg.expand();
+            tg.enableClosingConfirmation();
+        }
+
+        // Haptic feedback
+        function haptic(type) {
+            if (tg?.HapticFeedback) {
+                if (type === 'win') tg.HapticFeedback.notificationOccurred('success');
+                else if (type === 'lose') tg.HapticFeedback.notificationOccurred('error');
+                else tg.HapticFeedback.impactOccurred('medium');
+            }
+        }
+
+        // Данные игрока (localStorage)
+        let player = JSON.parse(localStorage.getItem('player')) || {
+            balance: 500,
+            level: 'Бурмалдатик',
+            levelEmoji: '🐣',
+            gamesPlayed: 0,
+            gamesWon: 0,
+            maxWin: 0,
+            streak: 1,
+            bestStreak: 1,
+            businesses: [],
+            inventory: [],
+            isVip: false
+        };
+
+        function savePlayer() {
+            localStorage.setItem('player', JSON.stringify(player));
+        }
+
+        // Уровни
+        const LEVELS = [
+            { days: 1, name: 'Бурмалдатик', emoji: '🐣' },
+            { days: 10, name: 'Лудик', emoji: '🎰' },
+            { days: 20, name: 'Миллионер', emoji: '💵' },
+            { days: 30, name: 'Депутат', emoji: '🏛' },
+            { days: 40, name: 'Бизнесмен', emoji: '💼' },
+            { days: 50, name: 'Олигарх', emoji: '💎' },
+            { days: 60, name: 'Монополист', emoji: '🏭' },
+            { days: 70, name: 'Глава картеля', emoji: '🔫' },
+            { days: 80, name: 'Меллстрой', emoji: '🔥' },
+            { days: 90, name: 'Мавроди', emoji: '📈' },
+            { days: 100, name: 'Мориарти', emoji: '🎭' }
+        ];
+
+        // Бизнесы
+        const BUSINESSES = [
+            { id: 'shawarma', name: '🌯 Шаурмечная', price: 100000, income: 150 },
+            { id: 'fastfood', name: '🍔 Забегаловка', price: 500000, income: 200 },
+            { id: 'supermarket', name: '🛒 Супермаркет', price: 1000000, income: 300 },
+            { id: 'restaurant', name: '🍽 Ресторан', price: 2000000, income: 400 },
+            { id: 'factory', name: '🏭 Алюминиевый завод', price: 3000000, income: 500 },
+            { id: 'bank', name: '🏦 Банк', price: 4000000, income: 600 }
+        ];
+
+        // Форматирование чисел
+        function formatNum(n) {
+            if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+            if (n >= 1000) return (n/1000).toFixed(0) + 'K';
+            return n.toString();
+        }
+
+        // Текущий экран
+        let currentScreen = 'home';
+        let currentBet = 100;
+
+        function showScreen(screen) {
+            currentScreen = screen;
+            haptic('tap');
+            
+            // Обновляем навигацию
+            document.querySelectorAll('.nav-btn').forEach((btn, i) => {
+                const screens = ['home', 'games', 'business', 'top', 'profile'];
+                btn.classList.toggle('active', screens[i] === screen);
+            });
+
+            const app = document.getElementById('app');
+            
+            switch(screen) {
+                case 'home': renderHome(); break;
+                case 'games': renderGames(); break;
+                case 'business': renderBusiness(); break;
+                case 'top': renderTop(); break;
+                case 'profile': renderProfile(); break;
+                default: renderHome();
+            }
+        }
+
+        // ==================== ГЛАВНАЯ ====================
+        function renderHome() {
+            const winrate = player.gamesPlayed > 0 ? Math.round(player.gamesWon / player.gamesPlayed * 100) : 0;
+            const totalIncome = player.businesses.reduce((sum, b) => {
+                const biz = BUSINESSES.find(x => x.id === b);
+                return sum + (biz?.income || 0);
+            }, 0);
+
+            document.getElementById('app').innerHTML = `
+                <div class="balance-card">
+                    <div class="text-sm opacity-70 mb-1">Ваш баланс</div>
+                    <div class="text-4xl font-bold mb-2">${formatNum(player.balance)} 💰</div>
+                    <div class="text-sm">
+                        ${player.levelEmoji} ${player.level} 
+                        ${player.isVip ? '⭐ VIP' : ''}
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                    <div class="card text-center">
+                        <div class="text-2xl mb-1">🎮</div>
+                        <div class="text-xl font-bold">${player.gamesPlayed}</div>
+                        <div class="text-xs opacity-70">Игр</div>
+                    </div>
+                    <div class="card text-center">
+                        <div class="text-2xl mb-1">🏆</div>
+                        <div class="text-xl font-bold">${winrate}%</div>
+                        <div class="text-xs opacity-70">Винрейт</div>
+                    </div>
+                    <div class="card text-center">
+                        <div class="text-2xl mb-1">🔥</div>
+                        <div class="text-xl font-bold">${player.streak}</div>
+                        <div class="text-xs opacity-70">Серия дней</div>
+                    </div>
+                    <div class="card text-center">
+                        <div class="text-2xl mb-1">💎</div>
+                        <div class="text-xl font-bold">${formatNum(player.maxWin)}</div>
+                        <div class="text-xs opacity-70">Макс. выигрыш</div>
+                    </div>
+                </div>
+
+                ${totalIncome > 0 ? `
+                <div class="card">
+                    <div class="flex justify-between items-center">
+                        <span>🏢 Доход от бизнесов</span>
+                        <span class="text-green-400 font-bold">+${totalIncome}/час</span>
+                    </div>
+                </div>
+                ` : ''}
+
+                <button class="btn btn-game mb-3" onclick="showScreen('games')">
+                    🎮 Играть
+                </button>
+                
+                <button class="btn mb-3" onclick="claimBonus()">
+                    🎁 Получить бонус
+                </button>
+            `;
+        }
+
+        // Бонус
+        let lastBonus = localStorage.getItem('lastBonus') || 0;
+        
+        function claimBonus() {
+            const now = Date.now();
+            const fourHours = 4 * 60 * 60 * 1000;
+            
+            if (now - lastBonus < fourHours) {
+                const remaining = fourHours - (now - lastBonus);
+                const hours = Math.floor(remaining / 3600000);
+                const mins = Math.floor((remaining % 3600000) / 60000);
+                alert(`⏰ Бонус будет доступен через ${hours}ч ${mins}мин`);
+                return;
+            }
+
+            const bonus = player.isVip ? 1000 : 500;
+            player.balance += bonus;
+            lastBonus = now;
+            localStorage.setItem('lastBonus', now);
+            savePlayer();
+            haptic('win');
+            alert(`🎁 Получено +${bonus} Лавров!`);
+            renderHome();
+        }
+
+        // ==================== ИГРЫ ====================
+        function renderGames() {
+            document.getElementById('app').innerHTML = `
+                <div class="text-center mb-4">
+                    <div class="text-sm opacity-70">Баланс</div>
+                    <div class="text-2xl font-bold">${formatNum(player.balance)} 💰</div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="text-sm opacity-70 mb-2">Ставка</div>
+                    <div class="flex gap-2 flex-wrap">
+                        <button class="bet-btn ${currentBet===50?'selected':''}" onclick="setBet(50)">50</button>
+                        <button class="bet-btn ${currentBet===100?'selected':''}" onclick="setBet(100)">100</button>
+                        <button class="bet-btn ${currentBet===250?'selected':''}" onclick="setBet(250)">250</button>
+                        <button class="bet-btn ${currentBet===500?'selected':''}" onclick="setBet(500)">500</button>
+                        <button class="bet-btn ${currentBet===1000?'selected':''}" onclick="setBet(1000)">1K</button>
+                        <button class="bet-btn" onclick="setBet(player.balance)">ALL-IN</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="game-btn" onclick="showGame('coin')">
+                        <div class="text-3xl mb-2">🪙</div>
+                        <div class="font-bold">Монетка</div>
+                        <div class="text-xs opacity-70">x2</div>
+                    </div>
+                    <div class="game-btn" onclick="showGame('cube')">
+                        <div class="text-3xl mb-2">🎲</div>
+                        <div class="font-bold">Кубик</div>
+                        <div class="text-xs opacity-70">x6</div>
+                    </div>
+                    <div class="game-btn" onclick="showGame('darts')">
+                        <div class="text-3xl mb-2">🎯</div>
+                        <div class="font-bold">Дартс</div>
+                        <div class="text-xs opacity-70">x6</div>
+                    </div>
+                    <div class="game-btn" onclick="showGame('basketball')">
+                        <div class="text-3xl mb-2">🏀</div>
+                        <div class="font-bold">Баскетбол</div>
+                        <div class="text-xs opacity-70">x2</div>
+                    </div>
+                    <div class="game-btn col-span-2" onclick="showGame('slots')">
+                        <div class="text-3xl mb-2">🎰</div>
+                        <div class="font-bold">Слоты</div>
+                        <div class="text-xs opacity-70">x8 / x32 (777)</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function setBet(amount) {
+            currentBet = Math.min(amount, player.balance);
+            haptic('tap');
+            renderGames();
+        }
+
+        function showGame(game) {
+            if (currentBet > player.balance) {
+                alert('❌ Недостаточно Лавров!');
+                return;
+            }
+            if (currentBet <= 0) {
+                alert('❌ Выберите ставку!');
+                return;
+            }
+
+            const app = document.getElementById('app');
+            
+            switch(game) {
+                case 'coin':
+                    app.innerHTML = `
+                        <div class="text-center mb-4">
+                            <div class="text-xl font-bold mb-2">🪙 Монетка</div>
+                            <div class="text-sm opacity-70">Ставка: ${currentBet} Лавров</div>
+                        </div>
+                        <div class="card text-center mb-4">
+                            <div class="text-6xl mb-4">🪙</div>
+                            <p>Выберите сторону:</p>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <button class="btn" onclick="playCoin('heads')">🦅 Орёл</button>
+                            <button class="btn" onclick="playCoin('tails')">👑 Решка</button>
+                        </div>
+                        <button class="btn mt-4" style="background: rgba(255,255,255,0.2)" onclick="renderGames()">◀️ Назад</button>
+                    `;
+                    break;
+                case 'cube':
+                    app.innerHTML = `
+                        <div class="text-center mb-4">
+                            <div class="text-xl font-bold mb-2">🎲 Кубик x6</div>
+                            <div class="text-sm opacity-70">Ставка: ${currentBet} Лавров</div>
+                        </div>
+                        <div class="card text-center mb-4">
+                            <div class="text-6xl mb-4">🎲</div>
+                            <p>Угадайте число:</p>
+                        </div>
+                        <div class="grid grid-cols-3 gap-3">
+                            ${[1,2,3,4,5,6].map(n => `<button class="btn" onclick="playCube(${n})">${n}</button>`).join('')}
+                        </div>
+                        <button class="btn mt-4" style="background: rgba(255,255,255,0.2)" onclick="renderGames()">◀️ Назад</button>
+                    `;
+                    break;
+                case 'darts':
+                    playDarts();
+                    break;
+                case 'basketball':
+                    playBasketball();
+                    break;
+                case 'slots':
+                    playSlots();
+                    break;
+            }
+        }
+
+        function playCoin(choice) {
+            haptic('tap');
+            const result = Math.random() < 0.5 ? 'heads' : 'tails';
+            const won = result === choice;
+            processResult(won, currentBet, won ? currentBet : 0, result === 'heads' ? '🦅 Орёл' : '👑 Решка');
+        }
+
+        function playCube(guess) {
+            haptic('tap');
+            const result = Math.floor(Math.random() * 6) + 1;
+            const won = result === guess;
+            const winAmount = won ? currentBet * 6 : 0;
+            processResult(won, currentBet, winAmount, `🎲 Выпало: ${result}`);
+        }
+
+        function playDarts() {
+            haptic('tap');
+            player.balance -= currentBet;
+            
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <div class="text-center">
+                    <div class="text-xl font-bold mb-4">🎯 Дартс</div>
+                    <div class="dice-result">🎯</div>
+                    <div class="text-lg">Бросаем...</div>
+                </div>
+            `;
+
+            setTimeout(() => {
+                const value = Math.floor(Math.random() * 6) + 1;
+                const won = value === 6;
+                const winAmount = won ? currentBet * 6 : 0;
+                
+                if (won) player.balance += currentBet + winAmount;
+                
+                player.gamesPlayed++;
+                if (won) {
+                    player.gamesWon++;
+                    player.maxWin = Math.max(player.maxWin, winAmount);
+                }
+                savePlayer();
+
+                showResult(won, winAmount, won ? '🎯 В яблочко!' : '🎯 Мимо...');
+            }, 2000);
+        }
+
+        function playBasketball() {
+            haptic('tap');
+            player.balance -= currentBet;
+            
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <div class="text-center">
+                    <div class="text-xl font-bold mb-4">🏀 Баскетбол</div>
+                    <div class="dice-result">🏀</div>
+                    <div class="text-lg">Бросаем...</div>
+                </div>
+            `;
+
+            setTimeout(() => {
+                const value = Math.floor(Math.random() * 5) + 1;
+                const won = value >= 4;
+                const winAmount = won ? currentBet * 2 : 0;
+                
+                if (won) player.balance += currentBet + winAmount;
+                
+                player.gamesPlayed++;
+                if (won) {
+                    player.gamesWon++;
+                    player.maxWin = Math.max(player.maxWin, winAmount);
+                }
+                savePlayer();
+
+                const msg = won ? '🏀 ГОЛ!' : (value === 3 ? '🏀 Штанга!' : '🏀 Мимо...');
+                showResult(won, winAmount, msg);
+            }, 2000);
+        }
+
+        function playSlots() {
+            haptic('tap');
+            player.balance -= currentBet;
+            
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <div class="text-center">
+                    <div class="text-xl font-bold mb-4">🎰 Слоты</div>
+                    <div class="dice-result">🎰</div>
+                    <div class="text-lg">Крутим...</div>
+                </div>
+            `;
+
+            setTimeout(() => {
+                const value = Math.floor(Math.random() * 64) + 1;
+                let won = false;
+                let winAmount = 0;
+                let msg = '🎰 Не повезло...';
+
+                if (value === 64) {
+                    won = true;
+                    winAmount = currentBet * 32;
+                    msg = '🎰🎰🎰 ДЖЕКПОТ 777!';
+                } else if (value === 1 || value === 22 || value === 43) {
+                    won = true;
+                    winAmount = currentBet * 8;
+                    msg = '🎰 Три одинаковых!';
+                }
+                
+                if (won) player.balance += currentBet + winAmount;
+                
+                player.gamesPlayed++;
+                if (won) {
+                    player.gamesWon++;
+                    player.maxWin = Math.max(player.maxWin, winAmount);
+                }
+                savePlayer();
+
+                showResult(won, winAmount, msg);
+            }, 2500);
+        }
+
+        function processResult(won, bet, winAmount, resultText) {
+            if (won) {
+                player.balance += winAmount;
+            } else {
+                player.balance -= bet;
+            }
+            
+            player.gamesPlayed++;
+            if (won) {
+                player.gamesWon++;
+                player.maxWin = Math.max(player.maxWin, winAmount);
+            }
+            savePlayer();
+
+            showResult(won, winAmount, resultText);
+        }
+
+        function showResult(won, winAmount, resultText) {
+            haptic(won ? 'win' : 'lose');
+            
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <div class="text-center ${won ? 'result-win' : 'result-lose'}">
+                    <div class="text-6xl mb-4">${won ? '🎉' : '😢'}</div>
+                    <div class="text-xl mb-2">${resultText}</div>
+                    <div class="text-3xl font-bold mb-4 ${won ? 'text-green-400' : 'text-red-400'}">
+                        ${won ? '+' + formatNum(winAmount) : '-' + formatNum(currentBet)} Лавров
+                    </div>
+                    <div class="text-lg opacity-70 mb-6">Баланс: ${formatNum(player.balance)} 💰</div>
+                    <button class="btn btn-game mb-3" onclick="renderGames()">🎮 Играть ещё</button>
+                    <button class="btn" onclick="showScreen('home')">🏠 Главная</button>
+                </div>
+            `;
+        }
+
+        // ==================== БИЗНЕСЫ ====================
+        function renderBusiness() {
+            const totalIncome = player.businesses.reduce((sum, b) => {
+                const biz = BUSINESSES.find(x => x.id === b);
+                return sum + (biz?.income || 0);
+            }, 0);
+
+            document.getElementById('app').innerHTML = `
+                <div class="text-center mb-4">
+                    <div class="text-sm opacity-70">Баланс</div>
+                    <div class="text-2xl font-bold">${formatNum(player.balance)} 💰</div>
+                    ${totalIncome > 0 ? `<div class="text-green-400 text-sm">+${totalIncome}/час</div>` : ''}
+                </div>
+
+                <div class="card mb-4">
+                    <div class="text-sm opacity-70 mb-1">Ваши бизнесы: ${player.businesses.length}/5</div>
+                </div>
+
+                ${BUSINESSES.map(biz => {
+                    const owned = player.businesses.includes(biz.id);
+                    return `
+                        <div class="card flex justify-between items-center">
+                            <div>
+                                <div class="font-bold">${biz.name}</div>
+                                <div class="text-sm text-green-400">+${biz.income}/час</div>
+                            </div>
+                            ${owned ? 
+                                `<button class="btn btn-success" style="width: auto; padding: 8px 16px" onclick="sellBusiness('${biz.id}')">Продать за ${formatNum(Math.floor(biz.price/3))}</button>` :
+                                `<button class="btn" style="width: auto; padding: 8px 16px" onclick="buyBusiness('${biz.id}')">${formatNum(biz.price)}</button>`
+                            }
+                        </div>
+                    `;
+                }).join('')}
+            `;
+        }
+
+        function buyBusiness(id) {
+            const biz = BUSINESSES.find(x => x.id === id);
+            if (!biz) return;
+
+            if (player.businesses.length >= 5) {
+                alert('❌ Максимум 5 бизнесов!');
+                return;
+            }
+            if (player.balance < biz.price) {
+                alert('❌ Недостаточно Лавров!');
+                return;
+            }
+
+            player.balance -= biz.price;
+            player.businesses.push(id);
+            savePlayer();
+            haptic('win');
+            renderBusiness();
+        }
+
+        function sellBusiness(id) {
+            const biz = BUSINESSES.find(x => x.id === id);
+            if (!biz) return;
+
+            const idx = player.businesses.indexOf(id);
+            if (idx === -1) return;
+
+            player.businesses.splice(idx, 1);
+            player.balance += Math.floor(biz.price / 3);
+            savePlayer();
+            haptic('tap');
+            renderBusiness();
+        }
+
+        // ==================== ТОПЫ ====================
+        function renderTop() {
+            // Генерируем фейковых игроков для демо
+            const fakePlayers = [
+                { name: 'Мориарти_Boss', balance: 15000000, emoji: '🎭' },
+                { name: 'LuckyDemon', balance: 8500000, emoji: '📈' },
+                { name: 'CasinoKing', balance: 5200000, emoji: '🔥' },
+                { name: 'MoneyMaker', balance: 3100000, emoji: '💎' },
+                { name: 'BigWinner', balance: 2800000, emoji: '💼' },
+                { name: 'ProGambler', balance: 1500000, emoji: '💵' },
+                { name: 'LuvrFan', balance: 900000, emoji: '🎰' },
+                { name: 'NewPlayer', balance: 450000, emoji: '🐣' },
+                { name: 'TestUser', balance: 120000, emoji: '🐣' },
+                { name: 'Guest', balance: 50000, emoji: '🐣' },
+            ];
+
+            // Добавляем текущего игрока
+            const myRank = fakePlayers.filter(p => p.balance > player.balance).length + 1;
+
+            document.getElementById('app').innerHTML = `
+                <div class="text-xl font-bold text-center mb-4">🏆 FORBES</div>
+                
+                ${fakePlayers.slice(0, 10).map((p, i) => `
+                    <div class="top-item">
+                        <div class="text-2xl mr-3">${i < 3 ? ['🥇','🥈','🥉'][i] : (i+1) + '.'}</div>
+                        <div class="flex-1">
+                            <div class="font-bold">${p.emoji} ${p.name}</div>
+                            <div class="text-sm text-yellow-400">${formatNum(p.balance)} Лавров</div>
+                        </div>
+                    </div>
+                `).join('')}
+
+                <div class="card mt-4 text-center">
+                    <div class="opacity-70">Ваше место</div>
+                    <div class="text-2xl font-bold">#${myRank}</div>
+                    <div class="text-yellow-400">${formatNum(player.balance)} Лавров</div>
+                </div>
+            `;
+        }
+
+        // ==================== ПРОФИЛЬ ====================
+        function renderProfile() {
+            const winrate = player.gamesPlayed > 0 ? Math.round(player.gamesWon / player.gamesPlayed * 100) : 0;
+
+            document.getElementById('app').innerHTML = `
+                <div class="balance-card">
+                    <div class="text-4xl mb-2">${player.levelEmoji}</div>
+                    <div class="text-xl font-bold">${player.level}</div>
+                    ${player.isVip ? '<div class="text-yellow-400">⭐ VIP</div>' : ''}
+                </div>
+
+                <div class="card">
+                    <div class="flex justify-between mb-2">
+                        <span class="opacity-70">💰 Баланс</span>
+                        <span class="font-bold">${formatNum(player.balance)}</span>
+                    </div>
+                    <div class="flex justify-between mb-2">
+                        <span class="opacity-70">🎮 Игр сыграно</span>
+                        <span class="font-bold">${player.gamesPlayed}</span>
+                    </div>
+                    <div class="flex justify-between mb-2">
+                        <span class="opacity-70">🏆 Побед</span>
+                        <span class="font-bold">${player.gamesWon}</span>
+                    </div>
+                    <div class="flex justify-between mb-2">
+                        <span class="opacity-70">📈 Винрейт</span>
+                        <span class="font-bold">${winrate}%</span>
+                    </div>
+                    <div class="flex justify-between mb-2">
+                        <span class="opacity-70">💎 Макс. выигрыш</span>
+                        <span class="font-bold">${formatNum(player.maxWin)}</span>
+                    </div>
+                    <div class="flex justify-between mb-2">
+                        <span class="opacity-70">🔥 Серия дней</span>
+                        <span class="font-bold">${player.streak}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="opacity-70">🏆 Лучшая серия</span>
+                        <span class="font-bold">${player.bestStreak}</span>
+                    </div>
+                </div>
+
+                <div class="card mt-4">
+                    <div class="text-center mb-3">
+                        <div class="text-lg font-bold">🤝 Пригласи друга</div>
+                        <div class="text-sm opacity-70">Получи +10 000 Лавров!</div>
+                    </div>
+                    <button class="btn btn-gold" onclick="copyRefLink()">📋 Копировать ссылку</button>
+                </div>
+            `;
+        }
+
+        function copyRefLink() {
+            const link = 'https://t.me/YOUR_BOT?start=ref123';
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(link);
+                haptic('win');
+                alert('✅ Ссылка скопирована!');
+            } else {
+                prompt('Ваша ссылка:', link);
+            }
+        }
+
+        // Запуск
+        showScreen('home');
+    </script>
+</body>
+</html>
